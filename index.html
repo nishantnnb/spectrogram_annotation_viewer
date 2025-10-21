@@ -241,8 +241,9 @@ canvas{display:block;width:100%;height:360px;}
     const ctx = canvas.getContext('2d', { alpha:false });
     const OFFW = 16384;
     let OFFH = 0;
-    const circular = document.createElement('canvas'); const cctx = circular.getContext('2d', { alpha:false });
-    const annLayer = document.createElement('canvas'); const actx = annLayer.getContext('2d', { alpha:true });
+    // initially allocate circular + annLayer
+    let circular = document.createElement('canvas'); let cctx = circular.getContext('2d', { alpha:false });
+    let annLayer = document.createElement('canvas'); let actx = annLayer.getContext('2d', { alpha:true });
     let totalColumnsWritten = 0;
     let rafId = null; let byteData = null;
 
@@ -254,12 +255,65 @@ canvas{display:block;width:100%;height:360px;}
       canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
       const axisBottom = 48;
       const viewH_css = Math.max(40, Math.round(cssH - axisBottom));
-      OFFH = Math.max(8, Math.round(viewH_css * dpr));
-      circular.width = OFFW; circular.height = OFFH;
-      annLayer.width = OFFW; annLayer.height = OFFH;
-      cctx.fillStyle = '#000'; cctx.fillRect(0,0,OFFW,OFFH);
-      actx.clearRect(0,0,annLayer.width, annLayer.height);
-      totalColumnsWritten = 0;
+      const newOFFH = Math.max(8, Math.round(viewH_css * dpr));
+
+      // If size unchanged, do nothing
+      if (newOFFH === OFFH && circular && annLayer) {
+        return;
+      }
+
+      // Preserve existing content: create new offscreen canvases and blit existing content into them
+      const oldCircular = circular;
+      const oldCctx = cctx;
+      const oldAnn = annLayer;
+      const oldActx = actx;
+      const oldOFFH = OFFH;
+      const oldTotalCols = totalColumnsWritten;
+
+      // Create new canvases with OFFW x newOFFH
+      const newCircular = document.createElement('canvas');
+      newCircular.width = OFFW;
+      newCircular.height = newOFFH;
+      const newCctx = newCircular.getContext('2d', { alpha:false });
+
+      const newAnn = document.createElement('canvas');
+      newAnn.width = OFFW;
+      newAnn.height = newOFFH;
+      const newActx = newAnn.getContext('2d', { alpha:true });
+
+      // If there was previous content, copy it, scaling vertically if needed.
+      if (oldCircular && oldOFFH > 0) {
+        // We must copy wrapped circular buffer appropriately.
+        // The circular buffer uses indices 0..OFFW-1 representing chronological columns.
+        // We'll copy the full width preserving horizontal positions; vertically we scale oldOFFH -> newOFFH.
+        try {
+          // draw full old circular into new canvas with vertical scaling
+          newCctx.fillStyle = '#000';
+          newCctx.fillRect(0,0,OFFW,newOFFH);
+          newCctx.drawImage(oldCircular, 0, 0, OFFW, oldOFFH, 0, 0, OFFW, newOFFH);
+
+          // copy annotation layer too
+          newActx.clearRect(0,0,OFFW,newOFFH);
+          newActx.drawImage(oldAnn, 0, 0, OFFW, oldOFFH, 0, 0, OFFW, newOFFH);
+        } catch (e) {
+          // fallback: clear new canvases if copy fails
+          newCctx.fillStyle = '#000';
+          newCctx.fillRect(0,0,OFFW,newOFFH);
+          newActx.clearRect(0,0,OFFW,newOFFH);
+        }
+      } else {
+        newCctx.fillStyle = '#000';
+        newCctx.fillRect(0,0,OFFW,newOFFH);
+        newActx.clearRect(0,0,OFFW,newOFFH);
+      }
+
+      // Replace references
+      circular = newCircular; cctx = newCctx;
+      annLayer = newAnn; actx = newActx;
+      OFFH = newOFFH;
+
+      // totalColumnsWritten must remain unchanged (we preserved buffer content)
+      totalColumnsWritten = oldTotalCols;
     }
 
     function secondsPerPixel(){
