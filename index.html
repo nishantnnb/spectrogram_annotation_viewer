@@ -1,0 +1,1099 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Spectrogram Viewer — full UI + playback logic</title>
+<style>
+:root{
+  --bg:#0b0b0b;
+  --panel:#121316;
+  --muted:#9aa4b2;
+  --white:#e6eef8;
+  --radius:8px;
+  --btn-padding:8px 12px;
+
+  --btn-gray-bg:#f2f4f6;
+  --btn-gray-text:#101214;
+
+  --play-dark-1:#0b8a3e;
+  --play-dark-2:#0a6f33;
+  --play-light-1:#27a65a;
+  --play-light-2:#1f9e47;
+
+  --pause-1:#f49b4a;
+  --pause-2:#e37f34;
+  --resume-1:#f7e78b;
+  --resume-2:#f4e76b;
+
+  --danger:#e04b4b;
+}
+
+html,body{height:100%;margin:0;background:var(--bg);color:var(--white);font-family:system-ui,Segoe UI,Roboto,Arial;}
+.app{padding:12px;box-sizing:border-box;max-width:1400px;margin:0 auto;}
+
+/* layout */
+#controls{display:flex;gap:12px;align-items:flex-start;margin-bottom:8px;}
+.controls-left{display:flex;gap:12px;align-items:center;flex:1 1 0;flex-wrap:wrap;}
+.controls-right{display:flex;gap:8px;align-items:center;flex:0 0 360px;justify-content:flex-end;}
+.ctrl{display:inline-flex;gap:8px;align-items:center;position:relative;}
+select,input,button{font-size:13px;}
+.filename-display{margin-left:8px;color:var(--muted);font-size:12px;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;}
+.visually-hidden{position:absolute!important;left:-9999px!important;width:1px!important;height:1px!important;overflow:hidden!important;}
+
+/* buttons */
+.btn{font-size:14px;padding:var(--btn-padding);border-radius:var(--radius);border:1px solid rgba(0,0,0,0.06);cursor:pointer;min-height:36px;display:inline-flex;align-items:center;justify-content:center;transition:transform 120ms ease,box-shadow 120ms ease,background 120ms ease;}
+.btn:disabled{opacity:0.45;cursor:not-allowed;transform:none;}
+.btn:hover:not(:disabled){transform:translateY(-1px);}
+
+/* gray group */
+.btn-gray{background:var(--btn-gray-bg);color:var(--btn-gray-text);border:1px solid rgba(16,18,20,0.06);box-shadow:0 1px 0 rgba(255,255,255,0.6) inset;}
+
+/* play states */
+.btn-play-dark{background:linear-gradient(180deg,var(--play-dark-1),var(--play-dark-2));color:#fff;border:1px solid rgba(0,0,0,0.18);box-shadow:0 6px 16px rgba(11,138,62,0.12);}
+.btn-play-light{background:linear-gradient(180deg,var(--play-light-1),var(--play-light-2));color:#fff;border:1px solid rgba(0,0,0,0.18);box-shadow:0 6px 16px rgba(31,158,85,0.12);}
+
+/* pause/resume */
+.btn-pause{background:linear-gradient(180deg,var(--pause-1),var(--pause-2));color:#101214;border:1px solid rgba(0,0,0,0.12);}
+.btn-resume{background:linear-gradient(180deg,var(--resume-1),var(--resume-2));color:#101214;border:1px solid rgba(0,0,0,0.12);}
+
+/* stop */
+.btn-stop{background:linear-gradient(180deg,#ff6b6b,var(--danger));color:#fff;border:1px solid rgba(0,0,0,0.22);box-shadow:0 6px 18px rgba(224,75,75,0.12);}
+
+/* viewer */
+#viewer{background:#000;border:1px solid #222;display:block;overflow:hidden;border-radius:8px;}
+canvas{display:block;width:100%;height:360px;}
+.small{font-size:12px;color:var(--muted);}
+#controlsRow2{display:flex;flex-wrap:nowrap;gap:10px;align-items:center;margin-bottom:12px;justify-content:space-between;}
+.left-controls{display:flex;gap:8px;align-items:center;}
+.right-controls{display:flex;gap:8px;align-items:center;}
+#reviewTableFrame{margin-top:16px;max-height:300px;overflow:auto;border:1px solid #333;border-radius:6px;background:#121316;padding:8px;}
+</style>
+</head>
+<body>
+<div class="app" role="main" aria-label="Spectrogram viewer application">
+  <div id="controls" aria-hidden="false">
+    <div class="controls-left">
+      <div class="ctrl">
+        <button id="fileBtn" class="btn btn-gray" type="button" aria-label="Choose sound file">Sound file</button>
+        <input id="file" class="visually-hidden" type="file" accept="audio/*"/>
+        <span id="fileName" class="filename-display">No file chosen</span>
+      </div>
+
+      <div class="ctrl">
+        <button id="annFileBtn" class="btn btn-gray" type="button" aria-label="Choose annotation file">Annotations</button>
+        <input id="annFile" class="visually-hidden" type="file" accept=".csv,.tsv,.txt"/>
+        <span id="annFileName" class="filename-display">No file chosen</span>
+      </div>
+
+      <div class="ctrl">
+        <button id="saveReview" class="btn btn-gray" disabled>Save Review</button>
+      </div>
+    </div>
+
+    <div class="controls-right" aria-hidden="false">
+      <div style="width:360px;display:flex;justify-content:flex-end;gap:8px;">
+        <button id="playFromStart" class="btn btn-play-dark" disabled>Play from start</button>
+        <button id="playToggle" class="btn btn-resume" disabled style="margin-left:8px;">Resume</button>
+        <button id="stop" class="btn-stop btn" disabled style="margin-left:8px;">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="controlsRow2">
+    <div class="left-controls" id="otherControlsPlace"></div>
+    <div class="right-controls">
+      <div class="small">Position</div>
+      <div id="pos" class="small" style="min-width:110px;text-align:right;">0.00 / 0.00</div>
+    </div>
+  </div>
+
+  <div id="viewer" role="region" aria-label="Spectrogram area">
+    <canvas id="canvas" width="1400" height="360" aria-hidden="false"></canvas>
+  </div>
+
+  <div id="reviewTableFrame" aria-live="polite"></div>
+</div>
+
+<script>
+(function(){
+  const UI = {
+    fileBtn: document.getElementById('fileBtn'),
+    annFileBtn: document.getElementById('annFileBtn'),
+    file: document.getElementById('file'),
+    annFile: document.getElementById('annFile'),
+    fileName: document.getElementById('fileName'),
+    annFileName: document.getElementById('annFileName'),
+    saveReview: document.getElementById('saveReview'),
+    playFromStart: document.getElementById('playFromStart'),
+    playToggle: document.getElementById('playToggle'),
+    stop: document.getElementById('stop'),
+    canvas: document.getElementById('canvas'),
+    pos: document.getElementById('pos'),
+    reviewFrame: document.getElementById('reviewTableFrame')
+  };
+
+  /* preserved state + gating flags */
+  let parsedAnnotations = null;
+  let mapping = { start:'', end:'', low:'', high:'', label:'' };
+  let gracefulPauseRequested = false;
+  let userPaused = false;
+  let pausedDueToResize = false;
+  let resizingInProgress = false;
+  let resizeDebounceTimer = null;
+  let pausedByVisibility = false;
+  let pausedByNotMaximized = false;
+
+  if (!window.__spectro) window.__spectro = {};
+  window.__spectro.selectedRowIndex = -1;
+
+  /* helpers for filename UI (preserve on cancel) */
+  UI.fileBtn.addEventListener('click', ()=> UI.file.click());
+  UI.annFileBtn.addEventListener('click', ()=> UI.annFile.click());
+  function setVisibleFilename(displayElement, file) {
+    const disp = document.getElementById(displayElement);
+    if (!disp) return;
+    if (file && file.name) disp.textContent = file.name;
+  }
+
+  setVisibleFilename('fileName', UI.file.files && UI.file.files[0]);
+  setVisibleFilename('annFileName', UI.annFile.files && UI.annFile.files[0]);
+
+  function isWindowMaximizedApprox(){
+    const leftDiff = Math.abs(window.outerWidth - screen.availWidth);
+    const topDiff = Math.abs(window.outerHeight - screen.availHeight);
+    return (leftDiff <= 16 && topDiff <= 48);
+  }
+
+  function updatePlayFromStartForSelection(hasSelection){
+    if(hasSelection){
+      UI.playFromStart.textContent = 'Play selected';
+      UI.playFromStart.classList.remove('btn-play-dark');
+      UI.playFromStart.classList.add('btn-play-light');
+    } else {
+      UI.playFromStart.textContent = 'Play from start';
+      UI.playFromStart.classList.remove('btn-play-light');
+      UI.playFromStart.classList.add('btn-play-dark');
+    }
+  }
+  updatePlayFromStartForSelection(false);
+
+  function setPlayToggleToPause(){
+    UI.playToggle.classList.remove('btn-resume','btn-pause');
+    UI.playToggle.classList.add('btn-pause');
+    UI.playToggle.textContent = 'Pause';
+  }
+  function setPlayToggleToResume(){
+    UI.playToggle.classList.remove('btn-resume','btn-pause');
+    UI.playToggle.classList.add('btn-resume');
+    UI.playToggle.textContent = 'Resume';
+  }
+  setPlayToggleToResume();
+
+  function setPlaybackControlsEnabled(enabled){
+    UI.playFromStart.disabled = !enabled;
+    UI.playToggle.disabled = !enabled;
+    UI.stop.disabled = !enabled;
+  }
+
+  /* Audio module (preserved logic) */
+  const Audio = (function(){
+    let ctx = null, analyser = null, buffer = null, source = null, isPlaying=false, startTime=0, pausedAt=0;
+    function ensureCtx(){ if(!ctx) ctx = new (window.AudioContext||window.webkitAudioContext)(); return ctx; }
+    function createAnalyser(){ ensureCtx(); try{analyser&&analyser.disconnect();}catch(e){} analyser = ctx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.05; return analyser; }
+    async function loadArrayBuffer(ab){ ensureCtx(); if(ctx.state==='suspended') await ctx.resume().catch(()=>{}); buffer = await ctx.decodeAudioData(ab.slice(0)); return buffer; }
+    function startPlayback(offsetSec=0){
+      if(!buffer) throw new Error('No audio');
+      ensureCtx();
+      createAnalyser();
+      source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      startTime = ctx.currentTime - (offsetSec||0);
+      source.onended = () => {
+        isPlaying = false;
+        setPlayToggleToResume();
+        try { Draw.stopLoop && Draw.stopLoop(); } catch(e){}
+        try { UI.playFromStart.disabled = false; } catch(e){}
+      };
+      try{
+        source.start(0, offsetSec||0);
+        isPlaying = true;
+      }catch(e){
+        console.error('source.start failed', e);
+        throw e;
+      }
+    }
+    function pausePlayback(){ if(!isPlaying||!source) return; try{source.stop();}catch(e){} pausedAt = Math.max(0, (ctx && ctx.currentTime ? ctx.currentTime : 0) - startTime); try{source.disconnect&&source.disconnect();}catch(e){} source=null; isPlaying=false; }
+    function stopPlayback(){ if(source) try{ source.stop(); }catch(e){} source=null; isPlaying=false; pausedAt=0; }
+    function getCurrentPosition(){ if(!ctx) return 0; return isPlaying ? Math.max(0, ctx.currentTime - startTime) : pausedAt; }
+    function getAnalyser(){ return analyser; }
+    function getCtx(){ return ctx; }
+    function getBuffer(){ return buffer; }
+    function isPlayingNow(){ return isPlaying; }
+    return { loadArrayBuffer, startPlayback, pausePlayback, stopPlayback, getCurrentPosition, getAnalyser, getCtx, getBuffer, isPlayingNow };
+  })();
+
+  /* Draw module (full spectrogram rendering preserved) */
+  const Draw = (function(){
+    const canvas = UI.canvas;
+    const ctx = canvas.getContext('2d', { alpha:false });
+    const OFFW = 16384;
+    let OFFH = 0;
+    const circular = document.createElement('canvas'); const cctx = circular.getContext('2d', { alpha:false });
+    const annLayer = document.createElement('canvas'); const actx = annLayer.getContext('2d', { alpha:true });
+    let totalColumnsWritten = 0;
+    let rafId = null; let byteData = null;
+
+    function recalcSizes(){
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = Math.max(300, Math.round(canvas.clientWidth || 1400));
+      const cssH = Math.max(120, Math.round(canvas.clientHeight || 360));
+      canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
+      canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+      const axisBottom = 48;
+      const viewH_css = Math.max(40, Math.round(cssH - axisBottom));
+      OFFH = Math.max(8, Math.round(viewH_css * dpr));
+      circular.width = OFFW; circular.height = OFFH;
+      annLayer.width = OFFW; annLayer.height = OFFH;
+      cctx.fillStyle = '#000'; cctx.fillRect(0,0,OFFW,OFFH);
+      actx.clearRect(0,0,annLayer.width, annLayer.height);
+      totalColumnsWritten = 0;
+    }
+
+    function secondsPerPixel(){
+      const xSel = document.getElementById('xZoom');
+      const speedEl = xSel || document.getElementById('speed');
+      const speed = speedEl ? Math.max(1, Number(speedEl.value) || 1) : 1;
+      return 1 / (speed * 60);
+    }
+
+    function getYMaxHz(){
+      const sel = document.getElementById('yPreset');
+      if(!sel) return 15000;
+      const v = sel.value;
+      if(v === 'nyq'){
+        const ctx = Audio.getCtx && Audio.getCtx();
+        if(ctx && ctx.sampleRate) return ctx.sampleRate / 2;
+        return 22050;
+      }
+      const num = Number(v);
+      return Number.isFinite(num) ? num : 15000;
+    }
+
+    function paletteColor(v){
+      const t = v/255; const r=Math.round(255*Math.min(1,t*1.6)); const g=Math.round(255*Math.min(1,Math.max(0,(t-0.2)/0.8))); const b=Math.round(255*Math.max(0,1-t*1.3));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    function drawAxes(deviceVpW, deviceVpH, axisLeft_px, axisBottom_px, visibleCols, sPerPx){
+      const dpr = window.devicePixelRatio || 1;
+      ctx.save();
+      ctx.fillStyle = '#000';
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = Math.max(1, Math.round(1 * dpr));
+      const nyq = (Audio.getCtx && Audio.getCtx()) ? (Audio.getCtx().sampleRate ? Audio.getCtx().sampleRate/2 : 22050) : 22050;
+      const shownMaxHz = Math.max(100, Math.min(nyq, getYMaxHz()));
+      const yTickCount = 5;
+      for(let i=0;i<=yTickCount;i++){
+        const frac = i / yTickCount;
+        const hz = frac * shownMaxHz;
+        const topFrac = 1 - (hz / shownMaxHz);
+        const y = Math.round(topFrac * (deviceVpH - 1));
+        const tx = Math.round(axisLeft_px - 6 * dpr);
+        ctx.beginPath();
+        ctx.moveTo(tx + 0.5, y + 0.5);
+        ctx.lineTo(axisLeft_px - Math.round(2 * dpr) + 0.5, y + 0.5);
+        ctx.stroke();
+        const label = (hz >= 1000) ? (Math.round((hz/1000)*10)/10) + ' k' : String(Math.round(hz));
+        const fontSize = Math.max(10, Math.round(11 * dpr));
+        ctx.font = `${fontSize}px system-ui,Segoe UI,Roboto,Arial`;
+        ctx.fillStyle = '#cfd8e3';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        const textX = tx - Math.round(6 * dpr);
+        const textY = y + Math.round(4 * dpr);
+        ctx.fillText(label, textX, textY);
+      }
+      ctx.save();
+      ctx.translate(Math.round(axisLeft_px / 2), Math.round(deviceVpH / 2));
+      ctx.rotate(-Math.PI/2);
+      ctx.fillStyle = '#9aa4b2';
+      ctx.font = `${Math.max(12, Math.round(12 * dpr))}px system-ui,Segoe UI,Roboto,Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('kHz', 0, 0);
+      ctx.restore();
+
+      const tickInterval = 1;
+      const totalCols = Math.max(0, totalColumnsWritten);
+      const visibleColsUsed = Math.max(1, Math.min(visibleCols, totalCols || 1));
+      const rightmostLogical = Math.max(0, totalCols - 1);
+      const rightmostTime = rightmostLogical * sPerPx;
+      const leftmostLogical = Math.max(0, rightmostLogical - visibleColsUsed + 1);
+      const leftmostTime = leftmostLogical * sPerPx;
+      const emptyCols = visibleCols - visibleColsUsed;
+      const xOffsetPx = Math.round((emptyCols / visibleCols) * deviceVpW);
+
+      ctx.strokeStyle = '#666';
+      ctx.fillStyle = '#cfd8e3';
+      ctx.font = `${Math.max(10, Math.round(11 * dpr))}px system-ui,Segoe UI,Roboto,Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      const firstTick = Math.ceil(leftmostTime / tickInterval) * tickInterval;
+      for(let t = firstTick; t <= rightmostTime + 0.0001; t += tickInterval){
+        const rel = (t - leftmostTime) / (visibleCols * sPerPx);
+        const x = Math.round(axisLeft_px + xOffsetPx + rel * deviceVpW);
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, deviceVpH - Math.round((axisBottom_px - 2) * dpr) + 0.5);
+        ctx.lineTo(x + 0.5, deviceVpH - Math.round((axisBottom_px - 10) * dpr) + 0.5);
+        ctx.stroke();
+        const label = (t >= 60) ? (() => { const mm = Math.floor(t/60); const ss = Math.floor(t%60).toString().padStart(2,'0'); return `${mm}:${ss}`; })() : String(Math.floor(t));
+        const labelY = canvas.height - Math.round(20 * dpr);
+        ctx.fillText(label, x, labelY);
+      }
+
+      ctx.fillStyle = '#9aa4b2';
+      ctx.font = `${Math.max(12, Math.round(12 * dpr))}px system-font,Segoe UI,Roboto,Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const labelX = axisLeft_px + Math.round(deviceVpW / 2);
+      const labelY = canvas.height - Math.round(28 * dpr);
+      ctx.fillText('Time', labelX, labelY);
+      ctx.restore();
+    }
+
+    function drawAnnotationLabelsOnMainCanvas(){
+      if(!parsedAnnotations || !parsedAnnotations.rows || !parsedAnnotations.rows.length) return;
+      const dpr = window.devicePixelRatio || 1;
+      const axisLeft = 64;
+      const axisBottom = 48;
+      const cssCanvasW = canvas.clientWidth || (canvas.width / dpr);
+      const cssCanvasH = canvas.clientHeight || (canvas.height / dpr);
+      const vpW_css = Math.max(64, Math.round(cssCanvasW - axisLeft));
+      const visibleCols = Math.max(4, Math.round(vpW_css));
+      const deviceVpW = Math.round(vpW_css * dpr);
+      const deviceVpH = Math.round((cssCanvasH - axisBottom) * dpr);
+
+      const sPerPx = secondsPerPixel();
+      const totalCols = Math.max(0, totalColumnsWritten);
+      const visibleColsUsed = Math.max(1, Math.min(visibleCols, totalCols || 1));
+      const rightmostLogical = Math.max(0, totalCols - 1);
+      const rightmostTime = rightmostLogical * sPerPx;
+      const leftmostLogical = Math.max(0, rightmostLogical - visibleColsUsed + 1);
+      const leftmostTime = leftmostLogical * sPerPx;
+      const emptyCols = visibleCols - visibleColsUsed;
+      const xOffsetPx = Math.round((emptyCols / visibleCols) * deviceVpW);
+      const axisLeft_px = Math.round(axisLeft * dpr);
+
+      const rows = parsedAnnotations.rows;
+      const selIdx = (window.__spectro && typeof window.__spectro.selectedRowIndex === 'number') ? window.__spectro.selectedRowIndex : -1;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#ffd400';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 2;
+
+      const audioCtx = Audio.getCtx && Audio.getCtx();
+      const nyq = (audioCtx && audioCtx.sampleRate) ? audioCtx.sampleRate/2 : 22050;
+      const shownMaxHz = Math.max(100, Math.min(nyq, getYMaxHz()));
+
+      for(let i=0;i<rows.length;i++){
+        const row = rows[i];
+        const startRaw = row[mapping.start] || row.start || row['Start'] || row['start_time'] || row['t_start'] || row['Begin Time (s)'] || '';
+        const endRaw = row[mapping.end] || row.end || row['End'] || row['end_time'] || row['t_end'] || '';
+        const startSec = Number.parseFloat(String(startRaw).trim());
+        const endSec = Number.parseFloat(String(endRaw).trim());
+        if(!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) continue;
+        if(endSec < leftmostTime || startSec > rightmostTime + 1e-9) continue;
+
+        let lowHz = 0, highHz = nyq;
+        if(mapping.low || mapping.high){
+          const lowRaw = row[mapping.low] || row.low || row['Low'] || row['fmin'] || '';
+          const highRaw = row[mapping.high] || row.high || row['High'] || row['fmax'] || '';
+          const l = Number.parseFloat(String(lowRaw).trim());
+          const h = Number.parseFloat(String(highRaw).trim());
+          if(Number.isFinite(l)) lowHz = l;
+          if(Number.isFinite(h)) highHz = h;
+        }
+
+        const annLowClamped = Math.max(0, Math.min(lowHz, shownMaxHz));
+        const annHighClamped = Math.max(0, Math.min(highHz, shownMaxHz));
+        if(annHighClamped <= annLowClamped) continue;
+
+        const fracStart = (startSec - leftmostTime) / (visibleCols * secondsPerPixel());
+        const fracEnd = (endSec - leftmostTime) / (visibleCols * secondsPerPixel());
+        const x1 = axisLeft_px + xOffsetPx + fracStart * deviceVpW;
+        const x2 = axisLeft_px + xOffsetPx + fracEnd * deviceVpW;
+
+        const yHighFrac = 1 - (annHighClamped / shownMaxHz);
+        const yLowFrac = 1 - (annLowClamped / shownMaxHz);
+        const y1 = Math.max(0, Math.min(deviceVpH, Math.round(yHighFrac * deviceVpH)));
+        const y2 = Math.max(0, Math.min(deviceVpH, Math.round(yLowFrac * deviceVpH)));
+
+        const px = Math.round(Math.max(axisLeft_px + 2, Math.min(canvas.width - 8, Math.min(x1,x2))));
+        const py = Math.round(Math.max(2, Math.min(deviceVpH - 2, Math.min(y1,y2))));
+
+        let displayLabel = '';
+        if(mapping.label && row.hasOwnProperty(mapping.label)) displayLabel = String(row[mapping.label] || '');
+        else {
+          const possible = ['label','Label','tag','class','type'];
+          for(let k=0;k<possible.length && !displayLabel;k++){
+            if(row.hasOwnProperty(possible[k])) displayLabel = String(row[possible[k]] || '');
+          }
+        }
+
+        const shouldDraw = (i === selIdx) || (displayLabel && displayLabel.length);
+        if(!shouldDraw) continue;
+
+        const baseFont = (i === selIdx) ? 12 : 11;
+        const fontPx = Math.max(10, Math.round(baseFont * dpr));
+        ctx.font = `${fontPx}px system-ui,Segoe UI,Roboto,Arial`;
+        const labelText = (i === selIdx)
+          ? (String(i + 1) + (displayLabel ? ' | ' + displayLabel : ''))
+          : (String(i + 1) + ' | ' + displayLabel);
+
+        const badgeH = (i === selIdx) ? (Math.round(16 * dpr) + 4) : (Math.round(14 * dpr) + 4);
+        const badgeX = px + Math.round(4 * dpr);
+        const textX = badgeX + Math.round(4 * dpr);
+        const rawTextY = Math.max(py - badgeH - 4, 2) + Math.round(badgeH / 2);
+        const textY = Math.max(2 + Math.round(fontPx / 2), rawTextY);
+
+        ctx.fillText(labelText, textX, textY);
+      }
+
+      ctx.restore();
+    }
+
+    function drawAxesAndLabels(deviceVpW, deviceVpH, axisLeft_px, axisBottom_px, visibleCols, sPerPx){
+      drawAxes(deviceVpW, deviceVpH, axisLeft_px, axisBottom_px, visibleCols, sPerPx);
+      drawAnnotationLabelsOnMainCanvas();
+    }
+
+    function blitVisible(){
+      const dpr = window.devicePixelRatio || 1;
+      const axisLeft = 64;
+      const axisBottom = 48;
+      const cssCanvasW = canvas.clientWidth || (canvas.width / dpr);
+      const cssCanvasH = canvas.clientHeight || (canvas.height / dpr);
+      const vpW_css = Math.max(64, Math.round(cssCanvasW - axisLeft));
+      const visibleCols = Math.max(4, Math.round(vpW_css));
+      const deviceVpW = Math.round(vpW_css * dpr);
+      const deviceVpH = Math.round((cssCanvasH - axisBottom) * dpr);
+      const rightEdge = ((totalColumnsWritten - 1) + OFFW) % OFFW;
+      const leftEdge = (rightEdge - visibleCols + 1 + OFFW) % OFFW;
+      const axisLeft_px = Math.round(axisLeft * dpr);
+
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height - Math.round(axisBottom * dpr));
+
+      const totalCols = Math.max(0, totalColumnsWritten);
+      const visibleColsUsed = Math.max(1, Math.min(visibleCols, totalCols || 1));
+      const emptyCols = visibleCols - visibleColsUsed;
+      const xOffsetPx = Math.round((emptyCols / visibleCols) * deviceVpW);
+
+      if(leftEdge + visibleCols <= OFFW){
+        ctx.drawImage(circular, leftEdge, 0, visibleCols, OFFH, axisLeft_px, 0, deviceVpW, deviceVpH);
+        ctx.drawImage(annLayer, leftEdge, 0, visibleCols, OFFH, axisLeft_px, 0, deviceVpW, deviceVpH);
+        if(xOffsetPx > 0){
+          ctx.fillStyle = '#000';
+          ctx.fillRect(axisLeft_px, 0, xOffsetPx, deviceVpH);
+        }
+      } else {
+        const firstW = OFFW - leftEdge; const secondW = visibleCols - firstW;
+        const pxFirst = Math.round(deviceVpW * (firstW / visibleCols)); const pxSecond = deviceVpW - pxFirst;
+        ctx.drawImage(circular, leftEdge, 0, firstW, OFFH, axisLeft_px, 0, pxFirst, deviceVpH);
+        ctx.drawImage(circular, 0, 0, secondW, OFFH, axisLeft_px + pxFirst, 0, pxSecond, deviceVpH);
+        ctx.drawImage(annLayer, leftEdge, 0, firstW, OFFH, axisLeft_px, 0, pxFirst, deviceVpH);
+        ctx.drawImage(annLayer, 0, 0, secondW, OFFH, axisLeft_px + pxFirst, 0, pxSecond, deviceVpH);
+        if(xOffsetPx > 0){
+          ctx.fillStyle = '#000';
+          ctx.fillRect(axisLeft_px, 0, xOffsetPx, deviceVpH);
+        }
+      }
+
+      ctx.fillStyle = '#111'; ctx.fillRect(0, canvas.height - Math.round(axisBottom * dpr), canvas.width, Math.round(axisBottom * dpr));
+
+      const sPerPx = secondsPerPixel();
+      const cur = Audio.getCurrentPosition(); const buf = Audio.getBuffer(); const total = buf && buf.duration ? buf.duration : 0;
+      UI.pos.textContent = `${cur.toFixed(2)} / ${total.toFixed(2)}`;
+
+      drawAxesAndLabels(deviceVpW, deviceVpH, axisLeft_px, axisBottom, visibleCols, sPerPx);
+    }
+
+    function freqToRows(lowHz, highHz){
+      const actx = Audio.getCtx(); const srNyq = (actx && actx.sampleRate) ? actx.sampleRate/2 : 22050;
+      const userMaxHz = getYMaxHz(); const shownMaxHz = Math.max(100, Math.min(srNyq, userMaxHz));
+      const topFrac = 1 - (highHz / shownMaxHz); const bottomFrac = 1 - (lowHz / shownMaxHz);
+      const y1 = Math.max(0, Math.min(OFFH-1, Math.round(topFrac*(OFFH-1))));
+      const y2 = Math.max(0, Math.min(OFFH-1, Math.round(bottomFrac*(OFFH-1))));
+      return y1 <= y2 ? [y1,y2] : [y2,y1];
+    }
+
+    function stampAnnotationsForLogicalColumn(logicalCol){
+      try{
+        if(!parsedAnnotations || !parsedAnnotations.rows || !parsedAnnotations.rows.length) return;
+        const sPerPx = secondsPerPixel();
+        const colTime = logicalCol * sPerPx;
+        const rows = parsedAnnotations.rows;
+        const selIdx = (window.__spectro && typeof window.__spectro.selectedRowIndex === 'number') ? window.__spectro.selectedRowIndex : -1;
+
+        for(let i=0;i<rows.length;i++){
+          const row = rows[i];
+          const startRaw = row[mapping.start] || row.start || row['Start'] || row['start_time'] || row['t_start'] || row['Begin Time (s)'] || '';
+          const endRaw = row[mapping.end] || row.end || row['End'] || row['end_time'] || row['t_end'] || '';
+          const startSec = Number.parseFloat(String(startRaw).trim());
+          const endSec = Number.parseFloat(String(endRaw).trim());
+          if(!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) continue;
+          if(colTime < startSec || colTime > endSec) continue;
+          let lowHz = 0, highHz = 22050;
+          if(mapping.low || mapping.high){
+            const lowRaw = row[mapping.low] || row.low || row['Low'] || row['fmin'] || '';
+            const highRaw = row[mapping.high] || row.high || row['High'] || row['fmax'] || '';
+            const l = Number.parseFloat(String(lowRaw).trim());
+            const h = Number.parseFloat(String(highRaw).trim());
+            if(Number.isFinite(l)) lowHz = l;
+            if(Number.isFinite(h)) highHz = h;
+          }
+          const [r1, r2] = freqToRows(lowHz, highHz);
+          const colIdx = (logicalCol % OFFW + OFFW) % OFFW;
+
+          actx.fillStyle = 'rgba(255,238,153,0.08)';
+          actx.fillRect(colIdx, r1, 1, Math.max(1, r2 - r1 + 1));
+
+          if (i === selIdx) {
+            actx.save();
+            actx.strokeStyle = 'rgba(118,235,118,0.5)';
+            actx.lineWidth = 0.5;
+            const h = Math.max(1, r2 - r1 + 1);
+            const half = actx.lineWidth / 2;
+            const sx = colIdx - half + 0.5;
+            const sy = r1 - half + 0.5;
+            const sw = 1 + actx.lineWidth;
+            const sh = h + actx.lineWidth;
+            actx.strokeRect(sx, sy, sw, sh);
+            actx.restore();
+          } else {
+            actx.strokeStyle = 'rgba(255,238,153,0.45)';
+            actx.lineWidth = 1;
+            actx.beginPath();
+            actx.rect(colIdx + 0.5, r1 + 0.5, 0.0001, Math.max(1, r2 - r1));
+            actx.stroke();
+          }
+        }
+      }catch(e){ console.error('stampAnnotationsForLogicalColumn', e); }
+    }
+
+    function writeSpectrogramColumnFromBytes(bytes){
+      if(!bytes || !bytes.length) return;
+      const bins = bytes.length;
+      const actxAudio = Audio.getCtx(); const nyq = (actxAudio && actxAudio.sampleRate) ? actxAudio.sampleRate/2 : 22050;
+      const shownMaxHz = Math.min(nyq, getYMaxHz());
+      const indexMax = Math.max(1, Math.min(bins-1, Math.round((shownMaxHz/nyq)*(bins-1))));
+      const col = totalColumnsWritten % OFFW;
+      for(let y=0;y<OFFH;y++){
+        const frac = 1 - (y / (OFFH - 1));
+        const idx = Math.round(frac * indexMax);
+        const v = bytes[idx] || 0;
+        cctx.fillStyle = paletteColor(v);
+        cctx.fillRect(col, y, 1, 1);
+      }
+      stampAnnotationsForLogicalColumn(totalColumnsWritten);
+      totalColumnsWritten++;
+    }
+
+    function insertFinalColumns(bytes, count, paletteName, advance=true){
+      if(!bytes || !bytes.length) return;
+      const c = Math.max(1, Math.floor(count||1));
+      const bins = bytes.length;
+      const actxAudio = Audio.getCtx(); const nyq = (actxAudio && actxAudio.sampleRate) ? actxAudio.sampleRate/2 : 22050;
+      const shownMaxHz = Math.min(nyq, getYMaxHz());
+      const indexMax = Math.max(1, Math.min(bins-1, Math.round((shownMaxHz/nyq)*(bins-1))));
+      if(advance){
+        for(let i=0;i<c;i++){
+          const col = totalColumnsWritten % OFFW;
+          for(let y=0;y<OFFH;y++){
+            const frac = 1 - (y/(OFFH-1));
+            const idx = Math.round(frac * indexMax);
+            const v = bytes[idx] || 0;
+            cctx.fillStyle = paletteColor(v);
+            cctx.fillRect(col, y, 1, 1);
+          }
+          stampAnnotationsForLogicalColumn(totalColumnsWritten);
+          totalColumnsWritten++;
+        }
+      } else {
+        const saved = totalColumnsWritten;
+        for(let i=0;i<c;i++){
+          const col = totalColumnsWritten % OFFW;
+          for(let y=0;y<OFFH;y++){
+            const frac = 1 - (y/(OFFH-1));
+            const idx = Math.round(frac * indexMax);
+            const v = bytes[idx] || 0;
+            cctx.fillStyle = paletteColor(v);
+            cctx.fillRect(col, y, 1, 1);
+          }
+        }
+        totalColumnsWritten = saved;
+      }
+    }
+
+    function clearStampedAnnotations(){ actx.clearRect(0,0,annLayer.width, annLayer.height); }
+    function clearAllVisuals(){ try{ cctx.fillStyle = '#000'; cctx.fillRect(0,0,OFFW,OFFH); actx.clearRect(0,0,annLayer.width, annLayer.height); totalColumnsWritten = 0; }catch(e){ console.error('clearAllVisuals', e); } }
+
+    function redrawAnnotationsOnResume(){
+      try{
+        clearStampedAnnotations();
+        if(!parsedAnnotations || !parsedAnnotations.rows || !parsedAnnotations.rows.length){ blitVisible(); return; }
+        const dpr = window.devicePixelRatio || 1;
+        const axisLeft = 64;
+        const cssCanvasW = canvas.clientWidth || (canvas.width / dpr);
+        const vpW_css = Math.max(64, Math.round(cssCanvasW - axisLeft));
+        const visibleCols = Math.max(4, Math.round(vpW_css));
+        const rightmostLogical = Math.max(0, totalColumnsWritten - 1);
+        const windowStartLogical = Math.max(0, rightmostLogical - visibleCols + 1);
+        const windowEndLogical = rightmostLogical;
+        for(let logical = windowStartLogical; logical <= windowEndLogical; logical++){
+          stampAnnotationsForLogicalColumn(logical);
+        }
+        blitVisible();
+      }catch(e){ console.error('redrawAnnotationsOnResume', e); }
+    }
+
+    function startLoop(){
+      stopLoop();
+      const analyser = Audio.getAnalyser();
+      if(!analyser) return;
+      byteData = new Uint8Array(analyser.frequencyBinCount);
+      function frame(){
+        try{ analyser.getByteFrequencyData(byteData); }catch(e){ stopLoop(); return; }
+        for(let s=0;s<1;s++){
+          writeSpectrogramColumnFromBytes(byteData);
+        }
+        blitVisible();
+
+        if(gracefulPauseRequested){
+          gracefulPauseRequested = false;
+          try{ insertFinalColumns(byteData, 1, 'heat', true); }catch(e){}
+          try{ Audio.pausePlayback(); }catch(e){}
+          stopLoop(); return;
+        }
+
+        rafId = requestAnimationFrame(frame);
+      }
+      rafId = requestAnimationFrame(frame);
+    }
+
+    function stopLoop(){ if(rafId) cancelAnimationFrame(rafId); rafId=null; }
+
+    function setTotalColumnsFromTime(sec){
+      const sPerPx = secondsPerPixel();
+      const cols = Math.max(0, Math.round(sec / sPerPx));
+      totalColumnsWritten = cols;
+    }
+
+    return {
+      recalcSizes,
+      blitVisible,
+      startLoop,
+      stopLoop,
+      clearStampedAnnotations,
+      clearAllVisuals,
+      redrawAnnotationsOnResume,
+      insertFinalColumns,
+      setTotalColumnsFromTime,
+      _debug: { circular, annLayer, getTotalCols: ()=> totalColumnsWritten, OFFW, OFFH: ()=>OFFH }
+    };
+  })();
+
+  /* UI gating evaluation */
+  function refreshControlsEnabledState(){
+    const playing = Audio.isPlayingNow && Audio.isPlayingNow();
+    const stopped = !playing && Math.abs(Audio.getCurrentPosition() - 0) < 1e-9;
+    const ySel = document.getElementById('yPreset');
+    const xSel = document.getElementById('xZoom');
+    const hasBuffer = !!Audio.getBuffer();
+
+    if(ySel) ySel.disabled = !hasBuffer || !stopped;
+    if(xSel) xSel.disabled = !hasBuffer || !stopped;
+
+    if (!isWindowMaximizedApprox()){
+      pausedByNotMaximized = true;
+      setPlaybackControlsEnabled(false);
+      UI.playFromStart.disabled = true;
+      UI.playToggle.disabled = true;
+      UI.stop.disabled = true;
+      return;
+    }
+
+    if (pausedByVisibility){
+      setPlaybackControlsEnabled(false);
+      return;
+    }
+
+    pausedByNotMaximized = false;
+    const enablePlayFromStart = hasBuffer && !playing && !userPaused;
+    UI.playFromStart.disabled = !enablePlayFromStart;
+
+    UI.playToggle.disabled = !hasBuffer;
+    UI.stop.disabled = !hasBuffer;
+  }
+
+  /* File input handlers (fixed annotation load behavior) */
+  UI.file.addEventListener('change', async (e)=>{
+    const hasFiles = e.target && e.target.files && e.target.files.length > 0;
+    if (!hasFiles) return;
+    const f = e.target.files[0]; if(!f) return;
+    setVisibleFilename('fileName', f);
+    try{
+      Audio.stopPlayback();
+      Draw.stopLoop && Draw.stopLoop();
+      const ab = await f.arrayBuffer();
+      await Audio.loadArrayBuffer(ab);
+      userPaused = false; pausedDueToResize = false;
+      pausedByVisibility = false;
+      pausedByNotMaximized = !isWindowMaximizedApprox();
+      Draw.setTotalColumnsFromTime && Draw.setTotalColumnsFromTime(0);
+      Draw.clearStampedAnnotations && Draw.clearStampedAnnotations();
+      Draw.recalcSizes && Draw.recalcSizes();
+      Draw.blitVisible && Draw.blitVisible();
+      clearPlayCheckboxes && clearPlayCheckboxes();
+      setPlayToggleToResume();
+      if(pausedByNotMaximized){
+        setPlaybackControlsEnabled(false);
+      } else {
+        setPlaybackControlsEnabled(true);
+      }
+      refreshControlsEnabledState();
+    }catch(err){ console.error('audio load', err); alert('Failed to load audio'); }
+  });
+
+  UI.annFile.addEventListener('change', async (e)=>{
+    const hasFiles = e.target && e.target.files && e.target.files.length > 0;
+    if (!hasFiles) return;
+    const f = e.target.files[0]; if(!f) return;
+    setVisibleFilename('annFileName', f);
+    try{
+      const text = await f.text();
+      const raw = text.replace(/\r\n/g,'\n').split('\n').map(l=>l.trim()).filter(Boolean);
+      if(raw.length === 0){
+        parsedAnnotations = { headers:[], rows:[] };
+        window.__spectro.parsedAnnotations = parsedAnnotations;
+        clearPlayCheckboxes && clearPlayCheckboxes();
+        refreshControlsEnabledState();
+        return;
+      }
+      const headers = raw[0].split(/\t|,/).map(h=>h.trim());
+      const rows = [];
+      for(let i=1;i<raw.length;i++){ const parts = raw[i].split(/\t|,/); const obj = {}; for(let j=0;j<headers.length;j++) obj[headers[j]] = (parts[j]===undefined)?'':parts[j].trim(); rows.push(obj); }
+      parsedAnnotations = { headers, rows };
+      window.__spectro.parsedAnnotations = parsedAnnotations;
+      clearPlayCheckboxes && clearPlayCheckboxes();
+
+      const lower = headers.map(h=>h.toLowerCase());
+      function findHeader(re){ for(let k=0;k<lower.length;k++) if(re.test(lower[k])) return headers[k]; return ''; }
+      mapping.start = findHeader(/start|onset|time|tstart/) || headers[0] || '';
+      mapping.end   = findHeader(/end|offset|tend|time_end/) || headers[1] || mapping.start;
+      mapping.low   = findHeader(/low|fmin|minfreq/) || findHeader(/freq/) || '';
+      mapping.high  = findHeader(/high|fmax|maxfreq/) || mapping.low;
+      mapping.label = findHeader(/label|tag|class|type/) || '';
+      window.__spectro.mapping = mapping;
+
+      try{
+        const curPos = (typeof Audio.getCurrentPosition === 'function') ? Number(Audio.getCurrentPosition()) || 0 : 0;
+        Draw.setTotalColumnsFromTime && Draw.setTotalColumnsFromTime(curPos);
+      }catch(e){ console.error('setTotalColumnsFromTime error', e); }
+
+      if(Audio.isPlayingNow && Audio.isPlayingNow()){
+        const cur = Audio.getCurrentPosition();
+        Draw.setTotalColumnsFromTime && Draw.setTotalColumnsFromTime(cur);
+        Draw.redrawAnnotationsOnResume && Draw.redrawAnnotationsOnResume();
+      } else {
+        const cur = (typeof Audio.getCurrentPosition === 'function') ? Audio.getCurrentPosition() : 0;
+        Draw.setTotalColumnsFromTime && Draw.setTotalColumnsFromTime(cur);
+        Draw.redrawAnnotationsOnResume && Draw.redrawAnnotationsOnResume();
+      }
+
+      refreshControlsEnabledState();
+    }catch(err){ console.error('ann parse', err); alert('Failed to parse annotation file'); }
+  });
+
+  /* review table selection sync */
+  window.__review_table = window.__review_table || {};
+  window.__review_table.notifySelectionChange = function(selectedIndex){
+    const has = (typeof selectedIndex === 'number' && selectedIndex >= 0);
+    updatePlayFromStartForSelection(has);
+  };
+  UI.reviewFrame.addEventListener('click', ()=>{
+    try{
+      const cb = UI.reviewFrame.querySelector('input.play-checkbox:checked');
+      const tr = cb ? cb.closest('tr') : null;
+      const idx = tr ? Number(tr.dataset.rowIndex) : -1;
+      window.__review_table.notifySelectionChange(idx >= 0 ? idx : -1);
+    }catch(e){}
+  });
+
+  function findSelectedPlayRowIndex(){
+    try{
+      const frame = document.getElementById('reviewTableFrame');
+      if(!frame) return -1;
+      const cb = frame.querySelector('input.play-checkbox:checked');
+      if(!cb) return -1;
+      let tr = cb.closest('tr');
+      if(!tr) return -1;
+      const idx = Number(tr.dataset.rowIndex);
+      return Number.isFinite(idx) ? idx : -1;
+    }catch(e){ console.error('findSelectedPlayRowIndex', e); return -1; }
+  }
+
+  function clearPlayCheckboxes() {
+    try {
+      const frame = document.getElementById('reviewTableFrame');
+      if (!frame) return;
+      const checks = frame.querySelectorAll('input.play-checkbox:checked');
+      if (checks && checks.length) checks.forEach(ch => { ch.checked = false; });
+      const rows = frame.querySelectorAll('tbody tr');
+      if (rows && rows.length) {
+        rows.forEach(tr => tr.classList.remove('selected-row'));
+        rows.forEach(tr => tr.classList.remove('annotation-selected'));
+      }
+      if (window.__spectro) {
+        if (typeof window.__spectro.selectedRowIndex === 'number') window.__spectro.selectedRowIndex = -1;
+      }
+      if (window.__review_table && typeof window.__review_table.refresh === 'function') {
+        try { window.__review_table.refresh(); } catch(e){}
+      }
+      window.__review_table && window.__review_table.notifySelectionChange && window.__review_table.notifySelectionChange(-1);
+      updatePlayFromStartForSelection(false);
+    } catch (e) { console.error('clearPlayCheckboxes', e); }
+  }
+
+  /* playback controls */
+  UI.playToggle.addEventListener('click', async ()=>{
+    if (UI.playToggle.disabled) return;
+    if (!isWindowMaximizedApprox()){
+      pausedByNotMaximized = true;
+      setPlaybackControlsEnabled(false);
+      setPlayToggleToResume();
+      return;
+    }
+
+    if(!Audio.isPlayingNow()){
+      userPaused = false;
+      pausedDueToResize = false;
+      pausedByVisibility = false;
+      pausedByNotMaximized = false;
+      setPlaybackControlsEnabled(true);
+
+      const resumeAt = Audio.getCurrentPosition();
+      try{
+        Draw.setTotalColumnsFromTime && Draw.setTotalColumnsFromTime(resumeAt);
+        UI.playFromStart.disabled = true;
+        Audio.startPlayback(resumeAt);
+      }catch(err){ console.error('start', err); alert('Playback failed (click page to unlock audio)'); return; }
+      Draw.startLoop && Draw.startLoop();
+      Draw.clearStampedAnnotations && Draw.clearStampedAnnotations();
+      Draw.redrawAnnotationsOnResume && Draw.redrawAnnotationsOnResume();
+      setPlayToggleToPause();
+      refreshControlsEnabledState();
+    } else {
+      userPaused = true;
+      pausedDueToResize = false;
+      if(!gracefulPauseRequested){
+        gracefulPauseRequested = true; UI.playToggle.textContent = 'Pausing...';
+        setTimeout(()=>{
+          if(gracefulPauseRequested){
+            try{ Audio.pausePlayback(); }catch(e){ console.error(e); }
+            gracefulPauseRequested = false; setPlayToggleToResume();
+            Draw.stopLoop && Draw.stopLoop();
+            UI.playFromStart.disabled = true;
+            refreshControlsEnabledState();
+          }
+        }, 400);
+      } else {
+        gracefulPauseRequested = false; setPlayToggleToPause();
+      }
+    }
+  });
+
+  UI.playFromStart.addEventListener('click', async ()=>{
+    if (UI.playFromStart.disabled) return;
+    if (!isWindowMaximizedApprox()){
+      pausedByNotMaximized = true;
+      setPlaybackControlsEnabled(false);
+      return;
+    }
+    userPaused = false; pausedDueToResize = false;
+    gracefulPauseRequested = false;
+    try{
+      let startSec = 0;
+      try{
+        const selectedIdx = findSelectedPlayRowIndex();
+        if(selectedIdx >= 0 && parsedAnnotations && Array.isArray(parsedAnnotations.rows) && parsedAnnotations.rows[selectedIdx]){
+          const row = parsedAnnotations.rows[selectedIdx];
+          const startRaw = row[mapping.start] || row.start || row['Start'] || row['start_time'] || row['Begin Time (s)'] || '';
+          const parsed = Number.parseFloat(String(startRaw).trim());
+          if(Number.isFinite(parsed) && parsed >= 0) startSec = parsed;
+        }
+      }catch(e){ console.error('compute startSec for Play from start', e); }
+
+      Audio.stopPlayback(); Draw.stopLoop && Draw.stopLoop();
+      Draw.setTotalColumnsFromTime && Draw.setTotalColumnsFromTime(startSec);
+      Draw.clearStampedAnnotations && Draw.clearStampedAnnotations();
+      const ctx = Audio.getCtx && Audio.getCtx();
+      if(ctx && ctx.state === 'suspended' && typeof ctx.resume === 'function'){
+        try{ await ctx.resume(); }catch(e){ }
+      }
+      Draw.blitVisible && Draw.blitVisible();
+      UI.playFromStart.disabled = true;
+      Audio.startPlayback(startSec);
+      Draw.startLoop && Draw.startLoop();
+      Draw.clearStampedAnnotations && Draw.clearStampedAnnotations();
+      Draw.redrawAnnotationsOnResume && Draw.redrawAnnotationsOnResume();
+      setPlayToggleToPause();
+      Draw.blitVisible && Draw.blitVisible();
+      refreshControlsEnabledState();
+    }catch(err){ console.error('playFromStart', err); alert('Play from start failed'); }
+  });
+
+  UI.stop.addEventListener('click', ()=>{
+    if (UI.stop.disabled) return;
+    userPaused = false;
+    pausedDueToResize = false;
+    Audio.stopPlayback(); Draw.stopLoop && Draw.stopLoop();
+    Draw.clearAllVisuals && Draw.clearAllVisuals();
+    setPlayToggleToResume();
+    Draw.blitVisible && Draw.blitVisible();
+    UI.playFromStart.disabled = false;
+    refreshControlsEnabledState();
+  });
+
+  /* visibility / focus handling (fixed behavior) */
+  function pauseEverythingPreserveState() {
+    try {
+      if (Audio.isPlayingNow && Audio.isPlayingNow()) {
+        try { Audio.pausePlayback(); } catch(e) { console.error('Audio.pausePlayback', e); }
+      }
+      if (Draw.stopLoop) Draw.stopLoop();
+      setPlayToggleToResume();
+      pausedByVisibility = true;
+      setPlaybackControlsEnabled(false);
+      UI.playFromStart.disabled = true;
+      refreshControlsEnabledState();
+    } catch (err) { console.error('pauseEverythingPreserveState', err); }
+  }
+  function onVisibilityRestore() {
+    try {
+      pausedByVisibility = false;
+      if(!isWindowMaximizedApprox()){
+        pausedByNotMaximized = true;
+        setPlaybackControlsEnabled(false);
+      } else {
+        pausedByNotMaximized = false;
+        const hasBuffer = !!Audio.getBuffer();
+        const allowControls = hasBuffer && !pausedByVisibility && !pausedByNotMaximized;
+        setPlaybackControlsEnabled(allowControls);
+      }
+      refreshControlsEnabledState();
+    } catch (err){ console.error('onVisibilityRestore', err); }
+  }
+  document.addEventListener('visibilitychange', ()=>{
+    if (document.visibilityState === 'hidden') pauseEverythingPreserveState();
+    else onVisibilityRestore();
+  });
+  window.addEventListener('blur', pauseEverythingPreserveState);
+  window.addEventListener('focus', onVisibilityRestore);
+
+  /* resize handling */
+  function onResizeEvent(){
+    const container = document.querySelector('.app');
+    const cssW = Math.min(1400, Math.max(600, container.clientWidth || 1400));
+    const cssH = 360;
+    const dpr = window.devicePixelRatio || 1;
+    UI.canvas.style.width = cssW + 'px';
+    UI.canvas.style.height = cssH + 'px';
+    UI.canvas.width = Math.round(cssW * dpr);
+    UI.canvas.height = Math.round(cssH * dpr);
+    if(Draw.recalcSizes) Draw.recalcSizes();
+    if(Draw.blitVisible) Draw.blitVisible();
+
+    if (!resizingInProgress){
+      resizingInProgress = true;
+      if (Audio.isPlayingNow && Audio.isPlayingNow()){
+        pausedDueToResize = true;
+        userPaused = false;
+        try { Audio.pausePlayback(); } catch(e){ console.error(e); }
+        Draw.stopLoop && Draw.stopLoop();
+        setPlayToggleToResume();
+      }
+      const maximizedNow = isWindowMaximizedApprox();
+      if(!maximizedNow){
+        pausedByNotMaximized = true;
+        setPlaybackControlsEnabled(false);
+      }
+    }
+
+    clearTimeout(resizeDebounceTimer);
+    resizeDebounceTimer = setTimeout(()=>{
+      resizingInProgress = false;
+      const maximized = isWindowMaximizedApprox();
+      if(!maximized){
+        if (Audio.isPlayingNow && Audio.isPlayingNow()){
+          try{ Audio.pausePlayback(); }catch(e){}
+          Draw.stopLoop && Draw.stopLoop();
+          setPlayToggleToResume();
+        }
+        pausedByNotMaximized = true;
+        setPlaybackControlsEnabled(false);
+      } else {
+        pausedByNotMaximized = false;
+        const hasBuffer = !!Audio.getBuffer();
+        const allowControls = hasBuffer && !pausedByVisibility && !pausedByNotMaximized;
+        setPlaybackControlsEnabled(allowControls);
+      }
+      refreshControlsEnabledState();
+    }, 180);
+  }
+  window.addEventListener('resize', onResizeEvent, { passive:true });
+
+  /* initialization */
+  function initCanvas(){
+    const container = document.querySelector('.app');
+    const cssW = Math.min(1400, Math.max(600, container.clientWidth || 1400));
+    const cssH = 360;
+    const dpr = window.devicePixelRatio || 1;
+    UI.canvas.style.width = cssW + 'px';
+    UI.canvas.style.height = cssH + 'px';
+    UI.canvas.width = Math.round(cssW * dpr);
+    UI.canvas.height = Math.round(cssH * dpr);
+    if(Draw.recalcSizes) Draw.recalcSizes();
+    if(Draw.blitVisible) Draw.blitVisible();
+    pausedByNotMaximized = !isWindowMaximizedApprox();
+    setPlaybackControlsEnabled(false);
+    UI.playFromStart.disabled = true;
+    UI.playToggle.disabled = true;
+    UI.stop.disabled = true;
+    refreshControlsEnabledState();
+  }
+  window.addEventListener('load', initCanvas);
+  initCanvas();
+
+  /* expose for debug */
+  window.__spectro.updatePlayFromStartForSelection = updatePlayFromStartForSelection;
+  window.__spectro.Audio = Audio;
+  window.__spectro.Draw = Draw;
+  window.__spectro.mapping = mapping;
+  window.__spectro.parsedAnnotations = parsedAnnotations;
+  window.__spectro.flags = ()=>({ userPaused, pausedDueToResize, resizingInProgress, pausedByVisibility, pausedByNotMaximized });
+
+})();
+</script>
+
+<script src="other.js"></script>
+<script src="review_table.js"></script>
+</body>
+</html>
