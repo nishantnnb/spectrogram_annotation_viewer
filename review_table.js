@@ -5,9 +5,25 @@
 // - Improved wheel handling so mouse wheel scroll works when pointer is over the table
 // - Save Review integration: creates/enables button with id "saveReview" and downloads reviewed table.
 // - Keeps play-checkbox state and row highlight (selected-row) consistently in sync
+// - Defaults: Low/High frequency default to 0 and 25000 Hz when absent
+// - If no row has valid Begin/Start and End times, disable all Play checkboxes
 (function(){
   const UNIFORM_DEFAULT_WIDTH = 90;
   const FRAME_ID = 'reviewTableFrame';
+
+  // --- start: review table defaults and key resolution ---
+  const DEFAULT_LOW_HZ = 0;
+  const DEFAULT_HIGH_HZ = 25000;
+
+  function resolveKeyByCandidates(headers, candidatesRegex) {
+    if (!Array.isArray(headers)) return '';
+    const lower = headers.map(h => String(h).toLowerCase());
+    for (let i = 0; i < lower.length; i++) {
+      if (candidatesRegex.test(lower[i])) return headers[i];
+    }
+    return '';
+  }
+  // --- end: review table defaults and key resolution ---
 
   function run() {
     const frame = document.getElementById(FRAME_ID);
@@ -110,7 +126,7 @@
         width: 14px; height: 14px; margin: 0; vertical-align: middle;
       }
       #${FRAME_ID} .sr-cell { text-align: right; padding-right: 12px; font-variant-numeric: tabular-nums; }
-      /* selected-row highlight: this was updated to rgba(173,216,230,0.4) per your preference */
+      /* selected-row highlight */
       #${FRAME_ID} tr.selected-row { background: rgba(173,216,230,0.4); }
     `;
     document.head.appendChild(style);
@@ -256,9 +272,40 @@
       // keep track of which tr was selected to maintain class
       const prevSel = (window.__spectro && typeof window.__spectro.selectedRowIndex === 'number') ? window.__spectro.selectedRowIndex : -1;
 
+      // Resolve canonical header keys and determine if any row has valid start/end
+      const startKey = resolveKeyByCandidates(headers, /start|onset|time|tstart/ ) || (headers[0] || '');
+      const endKey   = resolveKeyByCandidates(headers, /end|offset|tend|time_end/ ) || (headers[1] || startKey);
+      const lowKey   = resolveKeyByCandidates(headers, /low|fmin|minfreq/ ) || resolveKeyByCandidates(headers, /freq/ ) || '';
+      const highKey  = resolveKeyByCandidates(headers, /high|fmax|maxfreq/ ) || lowKey;
+
+      window.__review_table = window.__review_table || {};
+      window.__review_table._resolvedKeys = { startKey, endKey, lowKey, highKey };
+
+      const hasValidStartEnd = Array.isArray(rows) && rows.some(row => {
+        const s = Number.parseFloat(String((row[startKey] || row.start || row['Start'] || row['Begin Time (s)'] || '')).trim());
+        const e = Number.parseFloat(String((row[endKey]   || row.end   || row['End']   || '')).trim());
+        return Number.isFinite(s) && Number.isFinite(e) && e > s;
+      });
+      window.__review_table._hasValidStartEnd = !!hasValidStartEnd;
+
+      // determine whether Play should be interactive
+      const globalPlayEnabled = !!hasValidStartEnd;
+
       rows.forEach((row, rIdx) => {
         const tr = document.createElement('tr');
         tr.dataset.rowIndex = String(rIdx);
+
+        // compute low/high for the row and attach defaults when absent
+        (function attachFreqDefaults() {
+          const lk = (window.__review_table && window.__review_table._resolvedKeys && window.__review_table._resolvedKeys.lowKey) || '';
+          const hk = (window.__review_table && window.__review_table._resolvedKeys && window.__review_table._resolvedKeys.highKey) || '';
+          const rawLow = lk ? (row[lk] ?? row['Low'] ?? row['fmin'] ?? '') : (row['Low'] ?? row['fmin'] ?? '');
+          const rawHigh = hk ? (row[hk] ?? row['High'] ?? row['fmax'] ?? '') : (row['High'] ?? row['fmax'] ?? '');
+          const lowVal = Number.parseFloat(String(rawLow).trim());
+          const highVal = Number.parseFloat(String(rawHigh).trim());
+          tr.dataset.lowHz = Number.isFinite(lowVal) ? String(lowVal) : String(DEFAULT_LOW_HZ);
+          tr.dataset.highHz = Number.isFinite(highVal) ? String(highVal) : String(DEFAULT_HIGH_HZ);
+        })();
 
         // Play
         const playTd = document.createElement('td');
@@ -266,8 +313,9 @@
         const playChk = document.createElement('input');
         playChk.type = 'checkbox';
         playChk.className = 'play-checkbox';
-        // set checked if this index matches exported selectedRowIndex
-        if(rIdx === prevSel) playChk.checked = true;
+        playChk.disabled = !globalPlayEnabled;
+        // set checked if this index matches exported selectedRowIndex (only if enabled)
+        if(rIdx === prevSel && globalPlayEnabled) playChk.checked = true;
         playChk.addEventListener('change', () => {
           if(playChk.checked){
             // uncheck others
