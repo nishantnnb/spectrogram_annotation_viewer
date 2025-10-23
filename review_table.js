@@ -185,8 +185,9 @@
       // measure Play and Sr using canvas (deterministic); apply widths
       try {
         const playW = Math.max(24, measureHeaderTextPx('Play'));
-        const srW = Math.max(24, measureHeaderTextPx('Sr.'));
-        const cols = colgroup.children;
+        //const srW = Math.max(24, measureHeaderTextPx('Sr.'));
+        const srW = 40
+		const cols = colgroup.children;
         if(cols[0]) cols[0].style.width = playW + 'px';
         if(cols[1]) cols[1].style.width = srW + 'px';
       } catch (e) {
@@ -325,10 +326,17 @@
             // apply tr styling
             tbody.querySelectorAll('tr').forEach(rowEl => rowEl.classList.remove('selected-row'));
             tr.classList.add('selected-row');
+            // notify play selection change so Play-from-start label updates
+            if (window.__review_table && typeof window.__review_table.notifySelectionChange === 'function') {
+              try { window.__review_table.notifySelectionChange(rIdx); } catch (e) {}
+            }
           } else {
             // clear selection if unchecked
             if(window.__spectro) window.__spectro.selectedRowIndex = -1;
             tr.classList.remove('selected-row');
+            if (window.__review_table && typeof window.__review_table.notifySelectionChange === 'function') {
+              try { window.__review_table.notifySelectionChange(-1); } catch (e) {}
+            }
           }
         });
         playTd.appendChild(playChk);
@@ -360,6 +368,14 @@
         revChk.addEventListener('change', () => {
           remarksInput.disabled = revChk.checked;
           if(remarksInput.disabled) remarksInput.value = '';
+        });
+        // NEW: ensure Tab from remarks goes to the play/pause control (id="playToggle")
+        remarksInput.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Tab' && !ev.shiftKey) {
+            ev.preventDefault();
+            const playToggleEl = document.getElementById('playToggle');
+            if (playToggleEl) playToggleEl.focus();
+          }
         });
         remarksTd.appendChild(remarksInput);
         tr.appendChild(remarksTd);
