@@ -27,5 +27,5 @@ e.	On mouse is over the annotation (during the playback or paused condition), cu
 12)	Play checkbox: Only one checkbox can be selected the rows. When selected, the Play from start button gets toggled to Play from selected (Refer 4). And playback is started from the selected annotation. 
 13)	Sr: A column introduced by the tool to identify the rows distinctly. This number is always present on the annotation label (refer d).
 14)	Reviewed OK Checkbox: If checkbox is selected, it Indicates that the annotation is OK. Default: Selected. If deselected, annotation is not OK and Rejection Remarks (Refer 15) textbox is opened for remarks.  
-15)	 Rejection Remarks: This text box is opened on when Reviewed OK checkbox is deselected (Refer 14). 
+15)	 Rejection Remarks: This text box is enabled when Reviewed OK checkbox is deselected (Refer 14). 
 16)	All other columns present in the annotation text file. This entire tables gets loaded once annotation text file is loaded. Width of the columns in the file is adjustable. Rows can be scrolled with the mouse wheel.  
