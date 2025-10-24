@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Spectrogram Viewer — full UI + playback logic</title>
+<title>Spectrogram_Annotation_Viewer</title>
 <style>
 :root{
   --bg:#0b0b0b;
@@ -92,6 +92,7 @@ canvas{display:block;width:100%;height:360px;}
     </div>
 
     <div class="controls-right" aria-hidden="false">
+      <div><a href="https://github.com/nishantnnb/spectrogram_annotation_viewer/blob/main/README.md" target="_blank" rel="noopener noreferrer">Help</a></div>
       <div style="width:360px;display:flex;justify-content:flex-end;gap:8px;">
         <button id="playFromStart" class="btn btn-play-dark" disabled>Play from start</button>
         <button id="playToggle" class="btn btn-resume" disabled style="margin-left:8px;">Resume</button>
@@ -1176,3 +1177,4 @@ canvas{display:block;width:100%;height:360px;}
 <script src="mouse.js"></script>
 </body>
 </html>
+
